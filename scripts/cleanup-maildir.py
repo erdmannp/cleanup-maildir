@@ -324,36 +324,40 @@ class MaildirCleaner(object):
 
         # Need to iterate over keys and explicitly do a get_message to initialize flags.
         for i, msg_key in enumerate(maildir.iterkeys()):
-            if i % 1000 == 0:
-                self.logger.debug("Processed %d mails...", i)
+            try:
+                if i % 1000 == 0:
+                    self.logger.debug("Processed %d mails...", i)
 
-            msg = maildir.get_message(msg_key)
-            mid = msg.getMessageId()
-            if mid is None:
-                self.logger.debug("Mail without a message ID found (%d): %s", i, msg.getSubjectHash())
-                continue
+                msg = maildir.get_message(msg_key)
+                mid = msg.getMessageId()
+                if mid is None:
+                    self.logger.debug("Mail without a message ID found (%d): %s", i, msg.getSubjectHash())
+                    continue
 
-            if self.keepFlaggedThreads and msg.isFlagged():
-                self.keepMsgIds[mid] = 1
-                self.logger.debug("Flagged #%d: %s -- %s", i, msg.getSubjectHash(), mid)
+                if self.keepFlaggedThreads and msg.isFlagged():
+                    self.keepMsgIds[mid] = 1
+                    self.logger.debug("Flagged #%d: %s -- %s", i, msg.getSubjectHash(), mid)
 
-            if self.keepUnreadThreads and msg.isUnread():
-                self.keepMsgIds[mid] = 1
-                self.logger.debug("Unread #%d: %s -- %s", i, msg.getSubjectHash(), mid)
+                if self.keepUnreadThreads and msg.isUnread():
+                    self.keepMsgIds[mid] = 1
+                    self.logger.debug("Unread #%d: %s -- %s", i, msg.getSubjectHash(), mid)
 
-            # build references graph
-            references.new_node(mid)
+                # build references graph
+                references.new_node(mid)
 
-            irt = msg.getInReplyTo()
-            if irt is not None:
-                references.new_node(irt)
-                references.new_edge(mid, irt)
+                irt = msg.getInReplyTo()
+                if irt is not None:
+                    references.new_node(irt)
+                    references.new_edge(mid, irt)
 
-            # Add references header as well, as intermediate messages
-            # might be saved in the Sent folder.
-            for ref in msg.getReferences():
-                references.new_node(ref)
-                references.new_edge(mid, ref)
+                # Add references header as well, as intermediate messages
+                # might be saved in the Sent folder.
+                for ref in msg.getReferences():
+                    references.new_node(ref)
+                    references.new_edge(mid, ref)
+            except Exception as e:
+                errMsg = "Exception!: " + e.__str__()
+                self.log(logging.CRITICAL, errMsg, msg)
 
         # collect related messages using references graph
         for wmid in self.keepMsgIds.keys():
@@ -407,55 +411,59 @@ class MaildirCleaner(object):
         # Need to iterate over keys and explicitly do a get_message to initialize flags.
         # Also, the message key is needed for removing the message.
         for i, msg_key in enumerate(maildir.iterkeys()):
-            msg = maildir.get_message(msg_key)
-            mid = msg.getMessageId()
-            # If a message is gzipped, and, for any reason, cannot be parsed, it should not be moved.
-            if msg.getSubject() == None:
-                continue
-            if mid in self.keepMsgIds:
-                if msg.isFlagged():
-                    self.stats['flagged'] += 1
-                    self.log(logging.DEBUG, "Keeping #%d (flagged)" % i, msg)
-                else: # msg.isUnread()
-                    self.stats['unread'] += 1
-                    self.log(logging.DEBUG, "Keeping #%d (unread)" % i, msg)
-            elif mid in self.relatedMsgIds:
-                self.stats['related'] += 1
-                self.log(logging.DEBUG, "Keeping #%d (part of kept thread)" % i, msg)
-            elif self.keepRead and not msg.isUnread():
-                self.log(logging.DEBUG, "Keeping #%d (read)" % i, msg)
-                self.stats['read'] += 1
-            elif msg.getAge() < minAge:
-                self.log(logging.DEBUG, "Keeping #%d (recent)" % i, msg)
-                self.stats['recent'] += 1
-            else:
-                if mode == 'trash':
-                    self.log(logging.INFO, "%sTrashing #%d (old)" % (fakeMsg, i), msg)
-                    if not self.isTrialRun:
-                        maildir.remove(msg_key)
-                        self.trashDir.add(msg)
-                elif mode == 'delete':
-                    self.log(logging.INFO, "%sDeleting #%d (old)" % (fakeMsg, i), msg)
-                    if not self.isTrialRun:
-                        maildir.remove(msg_key)
-                else: # mode == 'archive'
-                    # Determine subfolder path
-                    mdate = msg.getDateSentOrRecd()
-                    datePart = '%04d' % mdate.year
-                    if self.archiveHierDepth > 1:
-                        datePart += self.folderSeperator + ('%02d' % mdate.month)
-                    if self.archiveHierDepth > 2:
-                        datePart += self.folderSeperator + ('%02d' % mdate.day)
-                    subFolder = archiveFolder + self.folderSeperator + datePart
-                    sfPath = os.path.join(self.folderBase, self.folderPrefix + subFolder)
-                    self.log(logging.INFO, "%sArchiving #%d to %s" % (fakeMsg, i, subFolder), msg)
-                    if not self.isTrialRun:
-                        md = mailbox.Maildir(sfPath)
-                        maildir.remove(msg_key)
-                        md.add(msg)
-                self.stats[mode] += 1
+            try:
+                msg = maildir.get_message(msg_key)
+                mid = msg.getMessageId()
+                # If a message is gzipped, and, for any reason, cannot be parsed, it should not be moved.
+                if msg.getSubject() == None:
+                    continue
+                if mid in self.keepMsgIds:
+                    if msg.isFlagged():
+                        self.stats['flagged'] += 1
+                        self.log(logging.DEBUG, "Keeping #%d (flagged)" % i, msg)
+                    else: # msg.isUnread()
+                        self.stats['unread'] += 1
+                        self.log(logging.DEBUG, "Keeping #%d (unread)" % i, msg)
+                elif mid in self.relatedMsgIds:
+                    self.stats['related'] += 1
+                    self.log(logging.DEBUG, "Keeping #%d (part of kept thread)" % i, msg)
+                elif self.keepRead and not msg.isUnread():
+                    self.log(logging.DEBUG, "Keeping #%d (read)" % i, msg)
+                    self.stats['read'] += 1
+                elif msg.getAge() < minAge:
+                    self.log(logging.DEBUG, "Keeping #%d (recent)" % i, msg)
+                    self.stats['recent'] += 1
+                else:
+                    if mode == 'trash':
+                        self.log(logging.INFO, "%sTrashing #%d (old)" % (fakeMsg, i), msg)
+                        if not self.isTrialRun:
+                            maildir.remove(msg_key)
+                            self.trashDir.add(msg)
+                    elif mode == 'delete':
+                        self.log(logging.INFO, "%sDeleting #%d (old)" % (fakeMsg, i), msg)
+                        if not self.isTrialRun:
+                            maildir.remove(msg_key)
+                    else: # mode == 'archive'
+                        # Determine subfolder path
+                        mdate = msg.getDateSentOrRecd()
+                        datePart = '%04d' % mdate.year
+                        if self.archiveHierDepth > 1:
+                            datePart += self.folderSeperator + ('%02d' % mdate.month)
+                        if self.archiveHierDepth > 2:
+                            datePart += self.folderSeperator + ('%02d' % mdate.day)
+                        subFolder = archiveFolder + self.folderSeperator + datePart
+                        sfPath = os.path.join(self.folderBase, self.folderPrefix + subFolder)
+                        self.log(logging.INFO, "%sArchiving #%d to %s" % (fakeMsg, i, subFolder), msg)
+                        if not self.isTrialRun:
+                            md = mailbox.Maildir(sfPath)
+                            maildir.remove(msg_key)
+                            md.add(msg)
+                    self.stats[mode] += 1
 
-            self.stats['total'] += 1
+                self.stats['total'] += 1
+            except Exception as e:
+                errMsg = "Exception!: " + e.__str__()
+                self.log(logging.CRITICAL, errMsg, msg)
 
     def log(self, lvl, text, msgObj):
         """Log some text with the subject of a message"""
